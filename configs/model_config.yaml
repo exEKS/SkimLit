@@ -1,0 +1,109 @@
+# Model Configuration
+model:
+  name: "skimlit_tribrid"
+  version: "2.0.0"
+  
+  # Token embedding
+  token_embedding:
+    type: "tensorflow_hub"
+    url: "https://tfhub.dev/google/universal-sentence-encoder/4"
+    output_dim: 512
+    trainable: false
+    
+  # Character embedding
+  char_embedding:
+    vocab_size: 70
+    embedding_dim: 25
+    max_sequence_length: 290
+    lstm_units: 32
+    bidirectional: true
+    
+  # Positional embedding
+  positional_embedding:
+    line_number_depth: 15
+    total_lines_depth: 20
+    dense_units: 32
+    
+  # Architecture
+  architecture:
+    token_dense_units: 128
+    combined_dense_units: 256
+    dropout_rate: 0.5
+    num_classes: 5
+    
+# Training configuration
+training:
+  batch_size: 32
+  epochs: 15
+  learning_rate: 0.001
+  validation_split: 0.1
+  
+  # Optimizer
+  optimizer:
+    type: "adam"
+    beta_1: 0.9
+    beta_2: 0.999
+    
+  # Loss
+  loss:
+    type: "categorical_crossentropy"
+    label_smoothing: 0.2
+    
+  # Callbacks
+  callbacks:
+    early_stopping:
+      monitor: "val_loss"
+      patience: 3
+      restore_best_weights: true
+      
+    reduce_lr:
+      monitor: "val_loss"
+      factor: 0.5
+      patience: 2
+      min_lr: 0.00001
+      
+    model_checkpoint:
+      monitor: "val_accuracy"
+      save_best_only: true
+      save_weights_only: false
+      
+# Data configuration
+data:
+  train_path: "data/train.txt"
+  val_path: "data/dev.txt"
+  test_path: "data/test.txt"
+  
+  # Preprocessing
+  preprocessing:
+    max_vocab_size: 68000
+    output_sequence_length: 55
+    char_output_length: 290
+    
+  # Class labels
+  labels:
+    - "BACKGROUND"
+    - "OBJECTIVE"
+    - "METHODS"
+    - "RESULTS"
+    - "CONCLUSIONS"
+    
+# API configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  reload: false
+  log_level: "info"
+  
+# Logging
+logging:
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+  file: "logs/skimlit.log"
+  rotation: "500 MB"
+  
+# Monitoring
+monitoring:
+  enable_prometheus: true
+  enable_sentry: false
+  sentry_dsn: ""
