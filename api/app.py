@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 import sys
 
+# Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.preprocessor import TextPreprocessor
@@ -27,6 +28,7 @@ from api.schemas import (
     ErrorResponse
 )
 
+# Initialize FastAPI app
 app = FastAPI(
     title="SkimLit API",
     description="AI-powered RCT abstract structuring API",
@@ -35,18 +37,21 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Prometheus metrics
 REQUEST_COUNT = Counter("skimlit_requests_total", "Total requests")
 REQUEST_LATENCY = Histogram("skimlit_request_duration_seconds", "Request latency")
 SENTENCE_COUNT = Counter("skimlit_sentences_processed_total", "Total sentences processed")
 
+# Global state
 class AppState:
     """Application state container."""
     model = None
@@ -66,28 +71,31 @@ state = AppState()
 async def startup_event():
     """Load model and initialize components on startup."""
     logger.info("Starting SkimLit API...")
-
+    
     try:
+        # Load configuration
         config_manager = ConfigManager("configs/model_config.yaml")
         state.config = config_manager.config
         logger.info("Configuration loaded")
-
+        
+        # Initialize preprocessor
         state.preprocessor = TextPreprocessor(state.config.get("data", {}).get("preprocessing", {}))
         state.preprocessor.load_spacy_model()
         logger.info("Preprocessor initialized")
-
+        
+        # Load model
         model_path = "models/skimlit_tribrid_model"
         if Path(model_path).exists():
             logger.info(f"Loading model from {model_path}")
-            state.model = tf.keras.models.load_model(str(model_path))
+            state.model = tf.keras.models.load_model(model_path)
             logger.info("Model loaded successfully")
         else:
-            logger.warning(f"Model not found at {model_path}, API will run without model")
-            state.model = None
-
+            logger.error(f"Model not found at {model_path}")
+            raise FileNotFoundError(f"Model not found at {model_path}")
+        
     except Exception as e:
         logger.error(f"Startup failed: {e}")
-        state.model = None
+        raise
 
 
 @app.on_event("shutdown")
@@ -140,7 +148,7 @@ async def get_stats():
         if state.stats["total_requests"] > 0
         else 0
     )
-
+    
     return StatsResponse(
         total_requests=state.stats["total_requests"],
         total_sentences=state.stats["total_sentences"],
@@ -157,18 +165,25 @@ async def predict_abstract(
 ):
     """
     Analyze an RCT abstract and classify each sentence.
+    
+    - **text**: Raw abstract text to analyze
+    - **return_probabilities**: Whether to include prediction probabilities for all classes
+    
+    Returns structured abstract with labeled sentences.
     """
     start_time = time.time()
     REQUEST_COUNT.inc()
-
+    
     try:
+        # Preprocess abstract
         processed_data = preprocessor.prepare_inference_data(request.text)
-
+        
         sentences = processed_data["sentences"]
         char_sequences = processed_data["char_sequences"]
         line_numbers_one_hot = processed_data["line_numbers_one_hot"]
         total_lines_one_hot = processed_data["total_lines_one_hot"]
-
+        
+        # Make predictions
         predictions = model.predict(
             {
                 "line_number_input": line_numbers_one_hot,
@@ -178,12 +193,13 @@ async def predict_abstract(
             },
             verbose=0
         )
-
+        
+        # Process predictions
         pred_labels = preprocessor.decode_predictions(predictions)
         max_probs = np.max(predictions, axis=1)
-
+        
+        # Create response
         sentence_predictions = []
-        label_names = state.config.get("data", {}).get("labels", ["BACKGROUND", "OBJECTIVE", "METHODS", "RESULTS", "CONCLUSIONS"])
         for idx, (sentence, label, prob) in enumerate(zip(sentences, pred_labels, max_probs)):
             pred = SentencePrediction(
                 text=sentence,
@@ -191,30 +207,33 @@ async def predict_abstract(
                 confidence=float(prob),
                 line_number=idx
             )
-
+            
+            # Add probabilities if requested
             if request.return_probabilities:
+                label_names = state.config["data"]["labels"]
                 pred.probabilities = {
-                    name: float(predictions[idx][i]) if i < len(predictions[idx]) else 0.0
+                    name: float(predictions[idx][i])
                     for i, name in enumerate(label_names)
                 }
-
+            
             sentence_predictions.append(pred)
-
+        
         processing_time = time.time() - start_time
-
+        
+        # Update stats
         state.stats["total_requests"] += 1
         state.stats["total_sentences"] += len(sentences)
         state.stats["total_processing_time"] += processing_time
-
+        
         SENTENCE_COUNT.inc(len(sentences))
         REQUEST_LATENCY.observe(processing_time)
-
+        
         return AbstractResponse(
             sentences=sentence_predictions,
             total_sentences=len(sentences),
             processing_time=processing_time
         )
-
+        
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -228,20 +247,25 @@ async def batch_predict(
 ):
     """
     Batch process multiple abstracts.
+    
+    - **abstracts**: List of abstracts to process (max 100)
+    
+    Returns list of structured abstracts.
     """
     start_time = time.time()
-
+    
     results = []
     for abstract_request in request.abstracts:
         try:
             result = await predict_abstract(abstract_request, model, preprocessor)
             results.append(result)
         except Exception as e:
-            logger.warning(f"Batch prediction skipped an abstract: {e}")
+            logger.error(f"Batch prediction error: {e}")
+            # Continue with other abstracts
             continue
-
+    
     total_time = time.time() - start_time
-
+    
     return BatchAbstractResponse(
         results=results,
         total_abstracts=len(results),
@@ -257,6 +281,7 @@ async def metrics():
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
+    """Custom HTTP exception handler."""
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(
@@ -268,6 +293,7 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
+    """General exception handler."""
     logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(
         status_code=500,
@@ -280,7 +306,7 @@ async def general_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-
+    
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
