@@ -1,4 +1,4 @@
-"""FastAPI application for SkimLit API (messy version)."""
+"""FastAPI application for SkimLit API."""
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,22 +48,29 @@ REQUEST_LATENCY = Histogram("skimlit_request_duration_seconds", "Request latency
 SENTENCE_COUNT = Counter("skimlit_sentences_processed_total", "Total sentences processed")
 
 class AppState:
+    """Application state container."""
     model = None
     preprocessor = None
     config = None
     start_time = time.time()
-    stats = {"total_requests": 0, "total_sentences": 0, "total_processing_time": 0}
+    stats = {
+        "total_requests": 0,
+        "total_sentences": 0,
+        "total_processing_time": 0
+    }
 
 state = AppState()
 
+
 @app.on_event("startup")
 async def startup_event():
+    """Load model and initialize components on startup."""
     logger.info("Starting SkimLit API...")
 
     try:
         config_manager = ConfigManager("configs/model_config.yaml")
         state.config = config_manager.config
-        logger.info("Config loaded...maybe")
+        logger.info("Configuration loaded")
 
         state.preprocessor = TextPreprocessor(state.config.get("data", {}).get("preprocessing", {}))
         state.preprocessor.load_spacy_model()
@@ -72,33 +79,40 @@ async def startup_event():
         model_path = "models/skimlit_tribrid_model"
         if Path(model_path).exists():
             logger.info(f"Loading model from {model_path}")
-            state.model = tf.keras.models.load_model(model_path)
-            logger.info("Model loaded!")
+            state.model = tf.keras.models.load_model(str(model_path))
+            logger.info("Model loaded successfully")
         else:
-            logger.error(f"Model not found at {model_path}")
+            logger.warning(f"Model not found at {model_path}, API will run without model")
             state.model = None
 
     except Exception as e:
         logger.error(f"Startup failed: {e}")
         state.model = None
-        state.preprocessor = None
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    """Cleanup on shutdown."""
     logger.info("Shutting down SkimLit API...")
 
+
 def get_model():
+    """Dependency to get model."""
     if state.model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     return state.model
 
+
 def get_preprocessor():
+    """Dependency to get preprocessor."""
     if state.preprocessor is None:
         raise HTTPException(status_code=503, detail="Preprocessor not initialized")
     return state.preprocessor
 
+
 @app.get("/", response_model=dict)
 async def root():
+    """Root endpoint."""
     return {
         "message": "Welcome to SkimLit API",
         "version": "2.0.0",
@@ -106,44 +120,59 @@ async def root():
         "health": "/health"
     }
 
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    status = "healthy" if state.model is not None else "unhealthy"
+    """Health check endpoint."""
     return HealthResponse(
-        status=status,
+        status="healthy" if state.model is not None else "unhealthy",
         model_loaded=state.model is not None,
         version="2.0.0"
     )
 
+
 @app.get("/stats", response_model=StatsResponse)
 async def get_stats():
+    """Get API statistics."""
     uptime = time.time() - state.start_time
-    avg_time = state.stats["total_processing_time"] / max(state.stats["total_requests"], 1)
+    avg_time = (
+        state.stats["total_processing_time"] / state.stats["total_requests"]
+        if state.stats["total_requests"] > 0
+        else 0
+    )
 
     return StatsResponse(
-        total_requests=state.stats.get("total_requests", 0),
-        total_sentences=state.stats.get("total_sentences", 0),
+        total_requests=state.stats["total_requests"],
+        total_sentences=state.stats["total_sentences"],
         avg_processing_time=avg_time,
         uptime_seconds=uptime
     )
 
+
 @app.post("/predict", response_model=AbstractResponse)
-async def predict_abstract(request: AbstractRequest, model=Depends(get_model), preprocessor=Depends(get_preprocessor)):
+async def predict_abstract(
+    request: AbstractRequest,
+    model=Depends(get_model),
+    preprocessor=Depends(get_preprocessor)
+):
+    """
+    Analyze an RCT abstract and classify each sentence.
+    """
     start_time = time.time()
     REQUEST_COUNT.inc()
 
     try:
         processed_data = preprocessor.prepare_inference_data(request.text)
 
-        sentences = processed_data.get("sentences", [])
-        char_sequences = processed_data.get("char_sequences", [])
-        line_numbers_one_hot = processed_data.get("line_numbers_one_hot", [])
-        total_lines_one_hot = processed_data.get("total_lines_one_hot", [])
+        sentences = processed_data["sentences"]
+        char_sequences = processed_data["char_sequences"]
+        line_numbers_one_hot = processed_data["line_numbers_one_hot"]
+        total_lines_one_hot = processed_data["total_lines_one_hot"]
 
         predictions = model.predict(
             {
-                "line_number_input": np.array(line_numbers_one_hot),
-                "total_lines_input": np.array(total_lines_one_hot),
+                "line_number_input": line_numbers_one_hot,
+                "total_lines_input": total_lines_one_hot,
                 "token_input": np.array(sentences),
                 "char_input": np.array(char_sequences)
             },
@@ -154,7 +183,7 @@ async def predict_abstract(request: AbstractRequest, model=Depends(get_model), p
         max_probs = np.max(predictions, axis=1)
 
         sentence_predictions = []
-        label_names = state.config.get("data", {}).get("labels", ["BACKGROUND","OBJECTIVE","METHODS","RESULTS","CONCLUSIONS"])
+        label_names = state.config.get("data", {}).get("labels", ["BACKGROUND", "OBJECTIVE", "METHODS", "RESULTS", "CONCLUSIONS"])
         for idx, (sentence, label, prob) in enumerate(zip(sentences, pred_labels, max_probs)):
             pred = SentencePrediction(
                 text=sentence,
@@ -162,14 +191,19 @@ async def predict_abstract(request: AbstractRequest, model=Depends(get_model), p
                 confidence=float(prob),
                 line_number=idx
             )
+
             if request.return_probabilities:
-                pred.probabilities = {name: float(predictions[idx][i]) for i, name in enumerate(label_names)}
+                pred.probabilities = {
+                    name: float(predictions[idx][i]) if i < len(predictions[idx]) else 0.0
+                    for i, name in enumerate(label_names)
+                }
+
             sentence_predictions.append(pred)
 
         processing_time = time.time() - start_time
 
         state.stats["total_requests"] += 1
-        state.stats["total_sentences"] += len(sentence_predictions)
+        state.stats["total_sentences"] += len(sentences)
         state.stats["total_processing_time"] += processing_time
 
         SENTENCE_COUNT.inc(len(sentences))
@@ -185,17 +219,25 @@ async def predict_abstract(request: AbstractRequest, model=Depends(get_model), p
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/batch-predict", response_model=BatchAbstractResponse)
-async def batch_predict(request: BatchAbstractRequest, model=Depends(get_model), preprocessor=Depends(get_preprocessor)):
-    start_time = time.time()
-    results = []
 
+@app.post("/batch-predict", response_model=BatchAbstractResponse)
+async def batch_predict(
+    request: BatchAbstractRequest,
+    model=Depends(get_model),
+    preprocessor=Depends(get_preprocessor)
+):
+    """
+    Batch process multiple abstracts.
+    """
+    start_time = time.time()
+
+    results = []
     for abstract_request in request.abstracts:
         try:
             result = await predict_abstract(abstract_request, model, preprocessor)
             results.append(result)
         except Exception as e:
-            logger.error(f"Batch prediction error: {e}")
+            logger.warning(f"Batch prediction skipped an abstract: {e}")
             continue
 
     total_time = time.time() - start_time
@@ -206,9 +248,12 @@ async def batch_predict(request: BatchAbstractRequest, model=Depends(get_model),
         total_processing_time=total_time
     )
 
+
 @app.get("/metrics")
 async def metrics():
+    """Prometheus metrics endpoint."""
     return Response(content=generate_latest(), media_type="text/plain")
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
@@ -219,6 +264,7 @@ async def http_exception_handler(request, exc):
             detail=str(exc)
         ).dict()
     )
+
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
@@ -231,8 +277,10 @@ async def general_exception_handler(request, exc):
         ).dict()
     )
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
