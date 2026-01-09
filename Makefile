@@ -1,4 +1,4 @@
-.PHONY: help install install-dev setup-data download-model train test lint format clean docker-build docker-run api streamlit
+.PHONY: help install install-dev setup-data download-model train test lint format clean docker-build docker-run docker-stop docker-logs api streamlit
 
 help:
 	@echo "SkimLit - Available commands:"
@@ -11,8 +11,15 @@ help:
 	@echo "  make lint             - Run linting"
 	@echo "  make format           - Format code"
 	@echo "  make clean            - Clean generated files"
-	@echo "  make docker-build     - Build Docker image"
-	@echo "  make docker-run       - Run Docker container"
+	@echo ""
+	@echo "Docker commands:"
+	@echo "  make docker-build     - Build all Docker images"
+	@echo "  make docker-up        - Start all containers"
+	@echo "  make docker-down      - Stop all containers"
+	@echo "  make docker-logs      - View container logs"
+	@echo "  make docker-clean     - Remove all containers and images"
+	@echo ""
+	@echo "Service commands:"
 	@echo "  make api              - Start FastAPI server"
 	@echo "  make streamlit        - Start Streamlit app"
 
@@ -67,16 +74,36 @@ clean:
 	rm -rf logs/ experiments/
 
 docker-build:
-	docker build -t skimlit:latest .
+	docker build -t skimlit-api:latest .
+	docker build -t skimlit-streamlit:latest -f Dockerfile.streamlit .
 
-docker-run:
-	docker run -p 8000:8000 skimlit:latest
-
-docker-compose-up:
+docker-up:
 	docker-compose up -d
 
-docker-compose-down:
+docker-down:
 	docker-compose down
+
+docker-logs:
+	docker-compose logs -f
+
+docker-restart:
+	docker-compose restart
+
+docker-clean:
+	docker-compose down -v --rmi all
+	docker system prune -af
+
+docker-dev:
+	docker-compose -f docker-compose.dev.yml up
+
+docker-shell-api:
+	docker-compose exec api bash
+
+docker-shell-streamlit:
+	docker-compose exec streamlit bash
+
+docker-test:
+	docker-compose exec api pytest tests/ -v
 
 api:
 	uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
