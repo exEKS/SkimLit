@@ -81,6 +81,12 @@ async def startup_event():
         # Initialize preprocessor
         state.preprocessor = TextPreprocessor(state.config.get("data", {}).get("preprocessing", {}))
         state.preprocessor.load_spacy_model()
+        
+        # Fit label encoder with known classes
+        class_names = state.config["data"]["labels"]
+        state.preprocessor.label_encoder.fit(class_names)
+        logger.info(f"Label encoder fitted with classes: {class_names}")
+        
         logger.info("Preprocessor initialized")
         
         # Load model
@@ -183,13 +189,13 @@ async def predict_abstract(
         line_numbers_one_hot = processed_data["line_numbers_one_hot"]
         total_lines_one_hot = processed_data["total_lines_one_hot"]
         
-        # Make predictions
+        # Make predictions (use correct input names from model)
         predictions = model.predict(
             {
                 "line_number_input": line_numbers_one_hot,
                 "total_lines_input": total_lines_one_hot,
-                "token_input": np.array(sentences),
-                "char_input": np.array(char_sequences)
+                "token_inputs": np.array(sentences),  # Changed: token_inputs (plural)
+                "char_inputs": np.array(char_sequences)  # Changed: char_inputs (plural)
             },
             verbose=0
         )
@@ -284,10 +290,10 @@ async def http_exception_handler(request, exc):
     """Custom HTTP exception handler."""
     return JSONResponse(
         status_code=exc.status_code,
-        content=ErrorResponse(
-            error=exc.detail,
-            detail=str(exc)
-        ).dict()
+        content={
+            "error": exc.detail,
+            "detail": str(exc)
+        }
     )
 
 
@@ -297,10 +303,10 @@ async def general_exception_handler(request, exc):
     logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(
         status_code=500,
-        content=ErrorResponse(
-            error="Internal server error",
-            detail=str(exc)
-        ).dict()
+        content={
+            "error": "Internal server error",
+            "detail": str(exc)
+        }
     )
 
 

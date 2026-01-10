@@ -77,7 +77,6 @@ class AbstractResponse(BaseModel):
     )
     total_sentences: int = Field(..., description="Total number of sentences")
     processing_time: float = Field(..., description="Processing time in seconds")
-    timestamp: datetime = Field(default_factory=datetime.now)
     
     class Config:
         schema_extra = {
@@ -91,8 +90,7 @@ class AbstractResponse(BaseModel):
                     }
                 ],
                 "total_sentences": 5,
-                "processing_time": 0.045,
-                "timestamp": "2024-01-08T10:30:00"
+                "processing_time": 0.045
             }
         }
 
@@ -129,7 +127,6 @@ class BatchAbstractResponse(BaseModel):
     results: List[AbstractResponse] = Field(..., description="List of results")
     total_abstracts: int = Field(..., description="Total abstracts processed")
     total_processing_time: float = Field(..., description="Total processing time")
-    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class HealthResponse(BaseModel):
@@ -138,15 +135,13 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Service status")
     model_loaded: bool = Field(..., description="Whether model is loaded")
     version: str = Field(..., description="API version")
-    timestamp: datetime = Field(default_factory=datetime.now)
     
     class Config:
         schema_extra = {
             "example": {
                 "status": "healthy",
                 "model_loaded": True,
-                "version": "2.0.0",
-                "timestamp": "2024-01-08T10:30:00"
+                "version": "2.0.0"
             }
         }
 
@@ -156,14 +151,12 @@ class ErrorResponse(BaseModel):
     
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(default=None, description="Detailed error information")
-    timestamp: datetime = Field(default_factory=datetime.now)
     
     class Config:
         schema_extra = {
             "example": {
                 "error": "Model not loaded",
-                "detail": "The model failed to load on startup",
-                "timestamp": "2024-01-08T10:30:00"
+                "detail": "The model failed to load on startup"
             }
         }
 

@@ -226,5 +226,15 @@ class TextPreprocessor:
             List of predicted class labels
         """
         pred_indices = np.argmax(predictions, axis=1)
+        
+        # Check if label_encoder is fitted
+        if not hasattr(self.label_encoder, 'classes_'):
+            # If not fitted, use class names directly
+            # This shouldn't happen if startup was successful
+            from loguru import logger
+            logger.warning("LabelEncoder not fitted, using default class names")
+            class_names = ["BACKGROUND", "OBJECTIVE", "METHODS", "RESULTS", "CONCLUSIONS"]
+            return [class_names[i] for i in pred_indices]
+        
         pred_labels = self.label_encoder.inverse_transform(pred_indices)
         return pred_labels.tolist()
