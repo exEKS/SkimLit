@@ -12,26 +12,6 @@
 
 ---
 
-## Table of Contents
-
-- [Overview](#-overview)
-- [Problem & Solution](#-problem--solution)
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Project Structure](#-project-structure)
-- [Model Details](#-model-details)
-- [API Documentation](#-api-documentation)
-- [Development](#-development)
-- [Testing](#-testing)
-- [Deployment](#-deployment)
-- [Performance](#-performance)
-- [License](#-license)
-
----
-
 ## Overview
 
 **SkimLit** is an NLP-powered tool that automatically classifies sentences in medical research abstracts into structured categories, making it easier for researchers to quickly understand and navigate scientific literature.
